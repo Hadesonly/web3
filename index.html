@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cross-Chain Bridge</title>
+    <script src="https://cdn.jsdelivr.net/npm/web3@1.8.0/dist/web3.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .direction-selector {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            gap: 10px;
+        }
+
+        .direction-btn {
+            padding: 10px 20px;
+            border: 2px solid #007bff;
+            background: white;
+            color: #007bff;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .direction-btn.active {
+            background: #007bff;
+            color: white;
+        }
+
+        .direction-btn:hover {
+            background: #0056b3;
+            color: white;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .status.info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+
+        .status.error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .status.success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .wallet-info {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .amount-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .amount-controls button {
+            margin: 0;
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        .wallet-status {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>跨链桥接工具</h1>
+
+        <div class="wallet-status">
+            <strong>OKX Wallet 状态：</strong><span id="walletStatus">检测中...</span>
+        </div>
+
+        <div class="direction-selector">
+            <button class="direction-btn active" onclick="setDirection('eth2bsc')" id="eth2bscBtn">ETH → BSC</button>
+            <button class="direction-btn" onclick="setDirection('bsc2eth')" id="bsc2ethBtn">BSC → ETH</button>
+        </div>
+
+        <div class="form-group">
+            <label for="contractAddress">L0 合约地址 (Contract Address):</label>
+            <input type="text" id="contractAddress" placeholder="输入L0合约地址">
+        </div>
+
+        <div class="form-group">
+            <label for="contractAbi">合约ABI:</label>
+            <textarea id="contractAbi" rows="10" placeholder="粘贴合约ABI JSON"></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="transferAmount">跨链费用 (Cross-chain Fee):</label>
+            <div class="amount-controls">
+                <input type="number" id="transferAmount" placeholder="输入跨链费用" step="0.000001" min="0">
+                <button type="button" onclick="setEstimatedFee()" id="estimateBtn" disabled>预估费用</button>
+                <button type="button" onclick="setMinimumFee()" id="minBtn" disabled>最低费用</button>
+            </div>
+            <small style="color: #666; margin-top: 5px; display: block;">留空则使用系统预估费用</small>
+        </div>
+
+        <div class="form-group">
+            <button onclick="connectWallet()">连接 OKX Wallet</button>
+            <button onclick="checkBalance()" id="checkBalanceBtn" disabled>检查余额</button>
+            <button onclick="bridgeTokens()" id="bridgeBtn" disabled>跨链转账</button>
+        </div>
+
+        <div class="wallet-info" id="walletInfo" style="display: none;">
+            <h3>钱包信息</h3>
+            <p><strong>地址:</strong> <span id="walletAddress"></span></p>
+            <p><strong><span id="nativeTokenLabel">ETH</span>余额:</strong> <span id="nativeBalance"></span></p>
+            <p><strong>代币余额:</strong> <span id="tokenBalance"></span></p>
+            <p><strong>底层代币地址:</strong> <span id="tokenAddress"></span></p>
+            <p><strong>链ID:</strong> <span id="chainId"></span></p>
+        </div>
+
+        <div class="status info" id="status">等待操作...</div>
+    </div>
+
+    <script>
+        let web3;
+        let account;
+        let contract;
+        let tokenContract;
+        let currentTokenBalance = '0';
+        let currentDecimals = 18;
+        let contractAbi;
+        let estimatedFee = '0';
+        let currentDirection = 'eth2bsc'; // 默认方向
+
+        // 网络配置
+        const NETWORKS = {
+            eth2bsc: {
+                chainId: '0x1', // Ethereum Mainnet
+                chainName: 'Ethereum Mainnet',
+                rpcUrls: ['https://eth.llamarpc.com'],
+                nativeCurrency: {
+                    name: 'Ether',
+                    symbol: 'ETH',
+                    decimals: 18
+                },
+                dstEid: 30102, // BSC链ID
+                extraOptions: "0x0003",
+                nativeToken: "ETH",
+                networkName: "ETH"
+            },
+            bsc2eth: {
+                chainId: '0x38', // BSC Mainnet
+                chainName: 'BNB Smart Chain',
+                rpcUrls: ['https://binance.llamarpc.com'],
+                nativeCurrency: {
+                    name: 'BNB',
+                    symbol: 'BNB',
+                    decimals: 18
+                },
+                dstEid: 30101, // ETH链ID
+                extraOptions: "0x",
+                nativeToken: "BNB",
+                networkName: "BSC"
+            }
+        };
+
+        // 标准ERC20 ABI (作为备用)
+        const ERC20_ABI = [
+            {
+                "constant": true,
+                "inputs": [{ "name": "_owner", "type": "address" }],
+                "name": "balanceOf",
+                "outputs": [{ "name": "balance", "type": "uint256" }],
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [],
+                "name": "decimals",
+                "outputs": [{ "name": "", "type": "uint8" }],
+                "type": "function"
+            },
+            {
+                "constant": true,
+                "inputs": [],
+                "name": "symbol",
+                "outputs": [{ "name": "", "type": "string" }],
+                "type": "function"
+            }
+        ];
+
+        function getTimestamp() {
+            return Math.floor(Date.now() / 1000);
+        }
+
+        function log(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            const timestamp = new Date().toLocaleTimeString();
+            const logMessage = `[${timestamp}] ${message}\n`;
+
+            statusDiv.textContent += logMessage;
+            statusDiv.className = `status ${type}`;
+            statusDiv.scrollTop = statusDiv.scrollHeight;
+        }
+
+        // 检查OKX Wallet是否安装
+        function checkOKXWallet() {
+            if (typeof window.okxwallet !== 'undefined') {
+                document.getElementById('walletStatus').textContent = '已安装';
+                return true;
+            } else {
+                document.getElementById('walletStatus').innerHTML = '未安装 <a href="https://www.okx.com/web3" target="_blank">点击安装</a>';
+                return false;
+            }
+        }
+
+        // 检查ABI中是否包含指定的方法
+        function hasMethod(abi, methodName) {
+            return abi.some(item => item.type === 'function' && item.name === methodName);
+        }
+
+        function setDirection(direction) {
+            currentDirection = direction;
+
+            // 更新按钮状态
+            document.getElementById('eth2bscBtn').classList.toggle('active', direction === 'eth2bsc');
+            document.getElementById('bsc2ethBtn').classList.toggle('active', direction === 'bsc2eth');
+
+            // 更新UI标签
+            const config = NETWORKS[direction];
+            document.getElementById('nativeTokenLabel').textContent = config.nativeToken;
+            document.getElementById('transferAmount').placeholder = `输入跨链费用 (${config.nativeToken})`;
+
+            // 清空状态
+            document.getElementById('status').textContent = '等待操作...';
+            document.getElementById('walletInfo').style.display = 'none';
+
+            // 重置按钮状态
+            document.getElementById('checkBalanceBtn').disabled = true;
+            document.getElementById('bridgeBtn').disabled = true;
+            document.getElementById('estimateBtn').disabled = true;
+            document.getElementById('minBtn').disabled = true;
+
+            log(`切换到 ${direction === 'eth2bsc' ? 'ETH → BSC' : 'BSC → ETH'} 模式`);
+        }
+
+        function setEstimatedFee() {
+            if (estimatedFee && estimatedFee !== '0') {
+                const feeInEther = web3.utils.fromWei(estimatedFee, 'ether');
+                document.getElementById('transferAmount').value = feeInEther;
+                const config = NETWORKS[currentDirection];
+                log(`设置跨链费用为预估值: ${feeInEther} ${config.nativeToken}`);
+            } else {
+                log('请先连接钱包并获取费用预估', 'error');
+            }
+        }
+
+        function setMinimumFee() {
+            if (estimatedFee && estimatedFee !== '0') {
+                // 设置为预估费用的90%作为最低费用
+                const minFee = web3.utils.toBN(estimatedFee).mul(web3.utils.toBN(90)).div(web3.utils.toBN(100));
+                const minFeeInEther = web3.utils.fromWei(minFee.toString(), 'ether');
+                document.getElementById('transferAmount').value = minFeeInEther;
+                const config = NETWORKS[currentDirection];
+                log(`设置跨链费用为最低值: ${minFeeInEther} ${config.nativeToken}`);
+            } else {
+                log('请先连接钱包并获取费用预估', 'error');
+            }
+        }
+
+        // 切换网络
+        async function switchNetwork(networkConfig) {
+            try {
+                await window.okxwallet.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: networkConfig.chainId }],
+                });
+                log(`已切换到 ${networkConfig.networkName} 网络`);
+            } catch (switchError) {
+                // 如果网络不存在，尝试添加网络
+                if (switchError.code === 4902) {
+                    try {
+                        await window.okxwallet.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [{
+                                chainId: networkConfig.chainId,
+                                chainName: networkConfig.chainName,
+                                rpcUrls: networkConfig.rpcUrls,
+                                nativeCurrency: networkConfig.nativeCurrency
+                            }],
+                        });
+                        log(`已添加并切换到 ${networkConfig.networkName} 网络`);
+                    } catch (addError) {
+                        throw new Error(`添加网络失败: ${addError.message}`);
+                    }
+                } else {
+                    throw new Error(`切换网络失败: ${switchError.message}`);
+                }
+            }
+        }
+
+        async function connectWallet() {
+            try {
+                if (!checkOKXWallet()) {
+                    log('请先安装 OKX Wallet 插件', 'error');
+                    return;
+                }
+
+                const contractAddress = document.getElementById('contractAddress').value.trim();
+                const abiText = document.getElementById('contractAbi').value.trim();
+
+                if (!contractAddress) {
+                    log('请输入合约地址', 'error');
+                    return;
+                }
+
+                if (!abiText) {
+                    log('请输入合约ABI', 'error');
+                    return;
+                }
+
+                const config = NETWORKS[currentDirection];
+                log(`正在连接到${config.networkName}网络...`);
+
+                // 请求连接钱包
+                const accounts = await window.okxwallet.request({
+                    method: 'eth_requestAccounts'
+                });
+
+                if (accounts.length === 0) {
+                    throw new Error('未能获取到账户地址');
+                }
+
+                account = accounts[0];
+                log(`钱包连接成功: ${account}`);
+
+                // 检查当前网络
+                const currentChainId = await window.okxwallet.request({
+                    method: 'eth_chainId'
+                });
+
+                if (currentChainId !== config.chainId) {
+                    log(`当前网络不匹配，正在切换到 ${config.networkName}...`);
+                    await switchNetwork(config);
+                }
+
+                // 初始化Web3，使用OKX Wallet作为provider
+                web3 = new Web3(window.okxwallet);
+
+                // 检查网络连接
+                const chainId = await web3.eth.net.getId();
+                log(`成功连接到网络，链ID: ${chainId}`);
+
+                // 解析并存储用户输入的ABI
+                try {
+                    contractAbi = JSON.parse(abiText);
+                    contract = new web3.eth.Contract(contractAbi, contractAddress);
+                    log('L0合约初始化成功');
+                } catch (error) {
+                    throw new Error('ABI格式错误: ' + error.message);
+                }
+
+                // 检查ABI中是否有balanceOf方法，决定如何处理代币余额
+                if (hasMethod(contractAbi, 'balanceOf')) {
+                    // 如果L0合约本身有balanceOf方法，直接使用
+                    log('检测到合约包含balanceOf方法，将直接使用L0合约查询余额');
+                    tokenContract = contract;
+                    document.getElementById('tokenAddress').textContent = contractAddress + ' (L0合约本身)';
+                } else {
+                    // 如果没有balanceOf方法，尝试获取底层代币地址
+                    try {
+                        if (hasMethod(contractAbi, 'token')) {
+                            const tokenAddress = await contract.methods.token().call();
+                            log(`底层代币地址: ${tokenAddress}`);
+
+                            // 使用用户提供的ABI创建代币合约，如果失败则使用标准ERC20 ABI
+                            try {
+                                tokenContract = new web3.eth.Contract(contractAbi, tokenAddress);
+                                if (!hasMethod(contractAbi, 'balanceOf')) {
+                                    throw new Error('用户ABI中没有balanceOf方法');
+                                }
+                                log('使用用户提供的ABI创建底层代币合约');
+                            } catch (e) {
+                                log('用户ABI不适用于底层代币，使用标准ERC20 ABI');
+                                tokenContract = new web3.eth.Contract(ERC20_ABI, tokenAddress);
+                            }
+
+                            document.getElementById('tokenAddress').textContent = tokenAddress;
+                        } else {
+                            throw new Error('合约ABI中没有token()方法，无法获取底层代币地址');
+                        }
+                    } catch (error) {
+                        log('获取底层代币地址失败: ' + error.message, 'error');
+                        throw error;
+                    }
+                }
+
+                // 更新UI
+                document.getElementById('walletAddress').textContent = account;
+                document.getElementById('chainId').textContent = chainId;
+                document.getElementById('walletInfo').style.display = 'block';
+                document.getElementById('checkBalanceBtn').disabled = false;
+                document.getElementById('bridgeBtn').disabled = false;
+                document.getElementById('estimateBtn').disabled = false;
+                document.getElementById('minBtn').disabled = false;
+
+                log('钱包连接成功!', 'success');
+
+            } catch (error) {
+                log('连接失败: ' + error.message, 'error');
+            }
+        }
+
+        async function checkBalance() {
+            try {
+                if (!web3 || !account || !contract || !tokenContract) {
+                    log('请先连接钱包', 'error');
+                    return;
+                }
+
+                log('正在检查余额...');
+
+                const config = NETWORKS[currentDirection];
+
+                // 检查原生代币余额
+                const nativeBalance = await web3.eth.getBalance(account);
+                const nativeBalanceEther = web3.utils.fromWei(nativeBalance, 'ether');
+                document.getElementById('nativeBalance').textContent = `${nativeBalanceEther} ${config.nativeToken}`;
+
+                // 检查代币余额
+                const tokenBalance = await tokenContract.methods.balanceOf(account).call();
+                currentTokenBalance = tokenBalance;
+
+                // 尝试获取代币精度和符号
+                let decimals = 18;
+                let symbol = 'TOKEN';
+                try {
+                    if (hasMethod(tokenContract.options.jsonInterface, 'decimals')) {
+                        decimals = await tokenContract.methods.decimals().call();
+                        currentDecimals = parseInt(decimals);
+                    }
+                    if (hasMethod(tokenContract.options.jsonInterface, 'symbol')) {
+                        symbol = await tokenContract.methods.symbol().call();
+                    }
+                } catch (e) {
+                    log('无法获取代币详情，使用默认值');
+                }
+
+                const tokenBalanceFormatted = (tokenBalance / Math.pow(10, decimals)).toFixed(6);
+                document.getElementById('tokenBalance').textContent = `${tokenBalanceFormatted} ${symbol}`;
+
+                log(`${config.nativeToken}余额: ${nativeBalanceEther}`, 'success');
+                log(`${symbol}余额: ${tokenBalanceFormatted}`, 'success');
+                log(`原始代币余额: ${tokenBalance}`, 'info');
+
+            } catch (error) {
+                log('检查余额失败: ' + error.message, 'error');
+            }
+        }
+
+        async function bridgeTokens() {
+            try {
+                if (!web3 || !account || !contract) {
+                    log('请先连接钱包', 'error');
+                    return;
+                }
+
+                log('开始跨链转账...');
+
+                const config = NETWORKS[currentDirection];
+
+                // 获取用户输入的跨链费用
+                const feeAmountInput = document.getElementById('transferAmount').value.trim();
+                let crossChainFee;
+
+                // 检查代币余额（如果有tokenContract的话）
+                let amountToTransfer = '0'; // 默认转账0个代币
+                // 尝试获取代币精度和符号
+                let decimals = 18;
+                let symbol = 'TOKEN';
+                try {
+                    if (hasMethod(tokenContract.options.jsonInterface, 'decimals')) {
+                        decimals = await tokenContract.methods.decimals().call();
+                        currentDecimals = parseInt(decimals);
+                    }
+                    if (hasMethod(tokenContract.options.jsonInterface, 'symbol')) {
+                        symbol = await tokenContract.methods.symbol().call();
+                    }
+                } catch (e) {
+                    log('无法获取代币详情，使用默认值');
+                }
+                if (tokenContract) {
+                    try {
+                        let bal = await tokenContract.methods.balanceOf(account).call();
+                        let balBN = new web3.utils.BN(bal);  // 转换为 BigNumber
+                        let divisorBN = new web3.utils.BN(10).pow(new web3.utils.BN(decimals));  // 计算 10^decimals
+                        let integerBalBN = balBN.div(divisorBN);  // 整数除法，向下取整（现在是用户单位的值）
+                        let rawAmountBN = integerBalBN.mul(divisorBN);  // 乘回 10^decimals
+                        if (bal !== '0') {
+                            amountToTransfer = rawAmountBN.toString(10); // 如果有代币余额，转账全部
+                            log(`检测到代币余额: ${bal}，将转账全部代币`);
+                        } else {
+                            log('代币余额为0，将执行空转账（仅支付跨链费用）');
+                        }
+                    } catch (e) {
+                        log('无法检查代币余额，将执行空转账', e.message + 'info');
+                    }
+                } else {
+                    log('未设置代币合约，将执行空转账（仅支付跨链费用）');
+                }
+
+                // 获取当前nonce
+                const nonce = await web3.eth.getTransactionCount(account);
+
+                // 构建SendParam结构
+                const sendParam = {
+                    dstEid: config.dstEid,
+                    to: web3.utils.hexToBytes(web3.utils.padLeft(account, 64)),
+                    amountLD: amountToTransfer,
+                    minAmountLD: amountToTransfer,
+                    extraOptions: config.extraOptions,
+                    composeMsg: "0x",
+                    oftCmd: "0x"
+                };
+
+                log(`构建SendParam: dstEid=${sendParam.dstEid}, amountLD=${sendParam.amountLD}`);
+
+                // 如果用户没有输入费用，先预估费用
+                if (!feeAmountInput) {
+                    log('正在预估跨链费用...');
+                    try {
+                        const feeQuote = await contract.methods.quoteSend(sendParam, false).call();
+                        estimatedFee = feeQuote.nativeFee;
+                        crossChainFee = estimatedFee;
+                        const feeInEther = web3.utils.fromWei(estimatedFee, 'ether');
+                        log(`预估跨链费用: ${feeInEther} ${config.nativeToken}`);
+                    } catch (feeError) {
+                        log(`费用预估失败: ${feeError.message}`, 'error');
+                        throw new Error('无法预估跨链费用，请手动输入费用金额');
+                    }
+                } else {
+                    crossChainFee = web3.utils.toWei(feeAmountInput, 'ether');
+                    log(`使用用户指定费用: ${feeAmountInput} ${config.nativeToken}`);
+                }
+
+                // 构建交易数据
+                const txData = contract.methods.send(
+                    sendParam,
+                    {
+                        nativeFee: crossChainFee,
+                        lzTokenFee: '0'
+                    },
+                    account
+                ).encodeABI();
+
+                log('正在预估Gas...');
+                let gasEstimate;
+                try {
+                    gasEstimate = await web3.eth.estimateGas({
+                        from: account,
+                        to: contract.options.address,
+                        data: txData,
+                        value: crossChainFee
+                    });
+                    log(`Gas估算: ${gasEstimate}`);
+                } catch (gasError) {
+                    log(`Gas估算失败: ${gasError.message}`, 'error');
+                    gasEstimate = 1000000; // 使用默认gas限制
+                    log(`使用默认Gas限制: ${gasEstimate}`);
+                }
+
+                // 获取当前gas价格
+                const gasPrice = await web3.eth.getGasPrice();
+                log(`当前Gas价格: ${web3.utils.fromWei(gasPrice, 'gwei')} Gwei`);
+
+                const gasLimit = Math.floor(gasEstimate * 1.2);
+
+                // 构建完整交易
+                const transaction = {
+                    from: account,
+                    to: contract.options.address,
+                    data: txData,
+                    value: web3.utils.toHex(crossChainFee),
+                    gas: web3.utils.toHex(gasLimit), // 增加20%的gas缓冲
+                    gasPrice: web3.utils.toHex(gasPrice),
+                    nonce: web3.utils.toHex(nonce)
+                };
+
+                log('正在发送交易...');
+
+                // 使用OKX Wallet发送交易
+                const txHash = await window.okxwallet.request({
+                    method: 'eth_sendTransaction',
+                    params: [transaction],
+                });
+
+                log(`交易成功发送!`, 'success');
+                log(`交易哈希: ${txHash}`, 'success');
+
+                // 检查交易是否成功上链
+                await checkTransactionStatus(txHash);
+
+            } catch (error) {
+                log('跨链转账失败: ' + error.message, 'error');
+                console.error('详细错误:', error);
+            }
+        }
+
+        // 添加简单的交易状态检查函数
+        async function checkTransactionStatus(txHash) {
+            try {
+                log('正在检查交易上链状态...');
+
+                // 等待交易确认
+                let attempts = 0;
+                const maxAttempts = 30; // 最多等待5分钟（每10秒检查一次）
+
+                const checkStatus = async () => {
+                    try {
+                        const receipt = await web3.eth.getTransactionReceipt(txHash);
+
+                        if (receipt) {
+                            if (receipt.status === true || receipt.status === '0x1') {
+                                log('✅ 交易已成功上链!', 'success');
+                                log(`区块号: ${receipt.blockNumber}`, 'success');
+                                return true;
+                            } else {
+                                log('❌ 交易上链失败', 'error');
+                                return false;
+                            }
+                        } else {
+                            attempts++;
+                            if (attempts >= maxAttempts) {
+                                log('⏰ 交易确认超时，请手动检查交易状态', 'error');
+                                return false;
+                            }
+
+                            log(`等待交易确认... (${attempts}/${maxAttempts})`);
+                            setTimeout(checkStatus, 10000); // 10秒后重试
+                        }
+                    } catch (error) {
+                        log('检查交易状态时出错: ' + error.message, 'error');
+                        return false;
+                    }
+                };
+
+                await checkStatus();
+
+            } catch (error) {
+                log('交易状态检查失败: ' + error.message, 'error');
+            }
+        }
+
+        // 监听OKX Wallet事件
+        if (typeof window.okxwallet !== 'undefined') {
+            window.okxwallet.on('accountsChanged', (accounts) => {
+                if (accounts.length > 0) {
+                    account = accounts[0];
+                    log(`账户已更改: ${account}`);
+                    document.getElementById('walletAddress').textContent = account;
+                } else {
+                    log('钱包已断开连接', 'error');
+                    account = null;
+                    document.getElementById('walletInfo').style.display = 'none';
+                }
+            });
+
+            window.okxwallet.on('chainChanged', (chainId) => {
+                log(`网络已更改: ${chainId}`);
+                document.getElementById('chainId').textContent = parseInt(chainId, 16);
+                // 建议重新连接以确保网络匹配
+                log('网络已更改，建议重新连接钱包', 'info');
+            });
+        }
+
+        // 页面加载完成后的初始化
+        window.addEventListener('load', function () {
+            checkOKXWallet();
+            log('页面加载完成，请选择跨链方向并填写必要信息');
+        });
+    </script>
+</body>
+
+</html>
